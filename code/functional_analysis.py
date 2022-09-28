@@ -7,7 +7,6 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import to_hex
 from collections import OrderedDict
 from sklearn.cluster import KMeans
-from mesmerize_utils import get_colormap, map_labels_to_colors, auto_colormap
 import numpy as np
 import pandas as pd
 import seaborn as sns
