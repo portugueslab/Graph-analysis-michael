@@ -332,6 +332,9 @@ def plot_cluster_heatmap(traces, clust_ids, ax, dt=1.0, show_cluster_borders=Tru
         pt.set_clip_box(None)
         prev_border = cb
 
+    #
+    ax.set_title('Clustered heatmap for mean node traces'); ax.set_ylabel('Traces #'); ax.set_xlabel('Time (s)')
+
     return im
 
 def calc_fc_matrix(data, todict=False):

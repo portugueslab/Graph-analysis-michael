@@ -224,6 +224,11 @@ def plot_corr_vs_dist(spatial_dist_mat, correlation_matrix, ax=None, title=None)
     classes=['Intra-hemisphere','Inter-hemisphere']
     ax.legend(handles=scatter_corr.legend_elements()[0], labels=classes)
 
+    # Plot the fit
+    z = np.polyfit(spatial_dist_mat.ravel(), correlation_matrix.ravel(), 1)
+    p = np.poly1d(z)
+    ax.plot(spatial_dist_mat.ravel(),p(spatial_dist_mat.ravel()),"r-")
+
 def threshold_conn_by_constant(corr_mat,threshold = 0.4):
     A = corr_mat.copy()
     A[np.abs(A)<threshold] = 0

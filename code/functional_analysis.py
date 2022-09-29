@@ -1,4 +1,5 @@
 import os
+from turtle import color
 import numpy as np
 import pickle
 
@@ -326,7 +327,7 @@ def default_colors():
     colors = prop_cycle.by_key()['color']
     return itertools.cycle(colors)
 
-def plot_cluster_traces(traces, clust_ids, axes, dt=1.0, sel_ids=None, colors=None, title='', **fig_kwargs):
+def plot_cluster_traces(traces, clust_ids, axes, swim_arr, dt=1.0, sel_ids=None, colors=None, title='', **fig_kwargs):
     """ Plot the mean traces for clusters
     :param traces:
     :param clust_ids:
@@ -350,16 +351,35 @@ def plot_cluster_traces(traces, clust_ids, axes, dt=1.0, sel_ids=None, colors=No
             ax.set_xticks([])
             ax.spines["bottom"].set_visible(False)
         ax.set_title(title)
+    axes[-1].plot(time, swim_arr*20, color='black')
+    axes[-1].spines['top'].set_visible(True)
+    axes[-1].axes.get_yaxis().set_visible(False)
+
+def _get_clusters(X, y):
+    # TODO: Add to mutils
+    s = np.argsort(y)
+    return np.split(X[s], np.unique(y[s], return_index=True)[1][1:])
 
 def plot_cluster_anatomy(clus_labels, LR_centers, XYZ, ax, **kwargs):
-    plt.rcParams["figure.figsize"] = 15,7;count=2
-    sc = ax[0].scatter(LR_centers[:,0],LR_centers[:,1], s=50,  c=clus_labels, cmap='viridis_r',**kwargs)
+    clust_colors = default_colors()
+    scatter_clus = []
     xx =  np.squeeze(XYZ[:,0])
     yy =  np.squeeze(XYZ[:,1])
     zz = np.squeeze(XYZ[:,2])
+    # sorted_labels = clus_labels[np.argsort(clus_labels)]
+    clustered_LR_centers = _get_clusters(LR_centers, clus_labels)
+
+    # plt.rcParams["figure.figsize"] = 15,7;
+    # count=2
     ax[0].scatter(xx, yy, lw=0, s=5, alpha=0.08, color=(0.3,) * 3)
     ax[1].scatter(yy, zz, lw=0, s=5, alpha=0.08, color=(0.3,) * 3)
-    ax[1].scatter(LR_centers[:,1],LR_centers[:,2], s=50,  c=clus_labels, cmap='viridis_r',**kwargs)
+    for clus_color, clus_n in zip(clust_colors,range(np.unique(clus_labels).shape[0])):
+        # scatter_clus.append(color)
+        # sorted_specific_labels = sorted_labels[sorted_labels==clus_n]
+        # LR_centers_clus = LR_centers[np.argsort(clus_labels)[:sorted_specific_labels.shape[0]]]
+        LR_centers_clus = clustered_LR_centers[clus_n]
+        sc = ax[0].scatter(LR_centers_clus[:,0],LR_centers_clus[:,1], s=50,  color=clus_color,**kwargs)
+        ax[1].scatter(LR_centers_clus[:,1],LR_centers_clus[:,2], s=50,  color=clus_color,**kwargs)
     plt.tick_params(left = False)
     return sc
 
