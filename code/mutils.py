@@ -179,11 +179,11 @@ def plot_neuronal_ridgeplot(denoised_traces, select_components, frame_rate, trac
     plt.tight_layout()
     # plt.savefig('ridge_plot.png',bbox_inches='tight')
 
-def examine_explained_variance(model, n_com, var_ax=None, title=None):
+def examine_explained_variance(explained_var, n_com, var_ax=None, title=None):
     '''
     The plots the amount of variance explained by select dimentionality reduced by plotting the cumulative explained variance by the main PCs alongside components
     Inputs:
-    - Model
+    - explained_var
     - num_comp_arr
     Returns: 
      None
@@ -192,7 +192,7 @@ def examine_explained_variance(model, n_com, var_ax=None, title=None):
         var_ax = plt.gca()
     num_comp_arr=np.arange(0,n_com ,1)
     # Calculate explaiend variacnce
-    expl_var=np.cumsum(model.explained_variance_ratio_) 
+    expl_var=np.cumsum(explained_var) 
     var_ax.plot(num_comp_arr, expl_var)
     var_ax.set_title("Explained variance for condition: {}".format(title), fontsize=16)
     var_ax.set_xlabel('PCs')
@@ -274,8 +274,6 @@ def plot_boxplot_features(df_estimators, headers):
         axes[i].yaxis.label.set_visible(False)
         plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.4,
                             wspace=0.35)
-    plt.savefig('box_plot.png',bbox_inches='tight')
-    plt.show()
     return f
 
 def default_colors():
@@ -423,37 +421,6 @@ def permute_weights(J, seed=0):
         newJ[src,dst] = weights[t]
         
     return newJ
-
-def get_cutoff(J, percentile_cutoff):
-    srcs, dsts = J.nonzero()
-    weights_lst = []
-    for (src, dst) in list(zip(srcs, dsts)):
-        weights_lst.append(J[src,dst])
-    cutoff_val = np.percentile(weights_lst, percentile_cutoff)
-    return cutoff_val
-
-def jthreshold(J, percentile_cutoff, above=True, pos=True, binarized=False, cutoff_val=None):
-    Jcopy = deepcopy(J)
-    if not pos:
-        Jcopy *= -1
-    
-    Jcopy = np.clip(Jcopy, 0., np.max(Jcopy))
-    if cutoff_val is None:
-        cutoff_val = get_cutoff(Jcopy, percentile_cutoff)
-    if above:
-        Jcopy[Jcopy < cutoff_val]  = 0
-        if binarized:
-            Jcopy[Jcopy >= cutoff_val] = 1
-        Jcopy = Jcopy.astype('float32')     
-    else:
-        ps,pd = np.where(Jcopy >= cutoff_val)
-        Jcopy[ps,pd] = 0
-        if binarized:
-            zs,zd = np.where((Jcopy < cutoff_val))
-            Jcopy[zs,zd]=1
-        Jcopy = Jcopy.astype('float32')            
-    Jcopy[np.diag_indices(Jcopy.shape[0])] = 0
-    return Jcopy
 
 def extract_weights(J, directed=True, nonzero=False):
     Jcopy = deepcopy(J)

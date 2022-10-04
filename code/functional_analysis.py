@@ -2,31 +2,44 @@ import os
 from turtle import color
 import numpy as np
 import pickle
+import time
 
 # from numba import jit
-from matplotlib import pyplot as plt
-from matplotlib.colors import to_hex
+
 from collections import OrderedDict
-from sklearn.cluster import KMeans
+
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+# Scipy imports
 import scipy
 from scipy import signal
-from scipy.cluster.vq import kmeans2
-from scipy.cluster.vq import whiten
+from scipy.cluster.vq import kmeans2,whiten
 from scipy.spatial.distance import cdist, pdist
 import scipy.cluster.hierarchy as sch
-from scipy.stats import spearmanr
-from scipy.stats import zscore
+from scipy.stats import spearmanr,zscore
 from scipy.spatial.distance import pdist
+
+# sklearn import
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import pairwise_distances, euclidean_distances
 from sklearn import datasets
+from sklearn.cluster import KMeans
+
+# Matplotlib
+from matplotlib import pyplot as plt
+from matplotlib.colors import to_hex
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import itertools 
+
+
+# Import nilearn/ nitime analysis libraries
+from nilearn.connectome import ConnectivityMeasure
+import nitime.analysis as nta
+import nitime.timeseries as ts
 
 # import tsne_adapted
 # import pca_basic
@@ -414,22 +427,207 @@ def plot_connectivity_matrix(A, ax=None):
                      labelpad= 20, va="bottom")
   ax.set(xlabel="Connectivity from", ylabel="Connectivity to")
 
+def _generate_transfer_entropy_connectivity():
+    """
+    TODO: Implement transfer entropy
+    """
 
-def generate_null_matrix(cov):
-    plt.rcParams["figure.figsize"] = 15,7;count=2
-    fig, axs = plt.subplots(2, 5, subplot_kw={'xticks': [], 'yticks': []})
-    for i in range(2):
-        for j in range(5):   
-            model = SpectralBiclustering(n_clusters=count, random_state=0)
-            model.fit(cov)
-            fit_cov = cov[np.argsort(model.row_labels_)]
-            fit_cov = fit_cov[:, np.argsort(model.row_labels_)]#column_labels_  // axs[i, j].imshow(fit_cov, cmap=plt.cm.Blues, vmin=0, vmax=30)
-            axs[i, j].scatter(avg_coordinates[:,0],avg_coordinates[:,1], s=50,  c=model.row_labels_, cmap='viridis_r')
-            count+=1
-    plt.tight_layout()
-    plt.tick_params(left = False)
-    plt.savefig('raw_cluster', dpi = 100)
-    plt.show()
+def _generate_granger_causality_connectivity(data, maxdelay, alpha=0.05):
+    """
+    Generates an asymmetric connectivity matrix 
+    Input:
+     - data: (numpy.array) of shape (n,t) with n samples and t timepoints. The matrix contains  mean traces of nodes or regions
+     - maxdelay: Maximum time-delay of interactions. 
+     - alpha: (float) Significance level for conditional independence tests
+    Returns:
+     - Asymmetric connectivity matrix constructed using Granger Causality  
+    """
+    TR = 1
+    thresh = 0 # Should we add thresh as a parameter?
+    
+    # TODO: Copy implementation of sampling interval like here
+    time_series = ts.TimeSeries(data.T, sampling_interval=TR)
+    # time_series = np.arange(data.shape[0])
+
+    order=maxdelay # State the lag delay order
+    G = nta.GrangerAnalyzer(time_series, order=order)
+    adj_mat = np.zeros((data.shape[0],data.shape[0])) # Define the adjacency matrix
+    
+    adj_mat=np.mean(np.nan_to_num(G.causality_xy[:, :]),-1)+np.mean(np.nan_to_num(G.causality_yx[:, :]),-1).T # Examine differences between directed causality
+    
+    adjmat1=np.mean(np.nan_to_num(G.causality_xy[:, :]),-1) # Causality from x to y
+    adjmat2=np.mean(np.nan_to_num(G.causality_yx[:, :]),-1) # Causality from y to x
+    
+    adj_mat=adjmat1+adjmat2.T # Create a complete adjacency matrix
+
+    weights = adj_mat
+    thresh = np.percentile(adj_mat,(1-alpha)*100) # Check for only statistically significant value
+    adjacency_mat=(adj_mat > thresh).astype(int)
+
+    return adjacency_mat
+
+
+
+def define_connectivity_matrix(M_all: np.ndarray, con_type: str = 'correlation', **kwargs) -> np.ndarray:
+    """
+    Args:
+    - M_all: A traces matrix (n x t) of n nodes/neurons across t times points
+    - con_type: Arguement for connectivity type
+    Returns 
+    - fc_dict: A dictionary which keys represent the type connectivity and value hosts a matrix
+    """
+    # Covariance
+    if con_type == 'covariance':
+        cov_measure = ConnectivityMeasure(kind=con_type)
+        adjacency_mat = cov_measure.fit_transform([M_all])[0]
+
+    # Correlation
+    if con_type == 'correlation':
+        correlation_measure = ConnectivityMeasure(kind=con_type)
+        adjacency_mat = correlation_measure.fit_transform([M_all])[0]
+    
+    # z-fisher correlation
+    elif con_type == 'z-correlation':
+        correlation_measure = ConnectivityMeasure(kind='correlation')
+        correlation_matrix = correlation_measure.fit_transform([M_all])[0]
+        adjacency_mat = np.tanh(correlation_matrix) # Perform Z-Fisher Transformed
+        # z_fisher_correlation_matrix = np.arctanh(correlation_matrix)
+    
+    # Partial Correlation
+    elif con_type == 'partial correlation':
+        correlation_measure = ConnectivityMeasure(kind=con_type)
+        adjacency_mat = correlation_measure.fit_transform([M_all])[0]
+    
+    # Euclidian Distance
+    elif con_type == 'euclidian distance':
+        adjacency_mat = euclidean_distances(M_all.T,M_all.T,)
+    
+    # Granger causality
+    elif con_type == 'granger causality':
+        maxdelay = kwargs.get('maxdelay')
+        alpha = kwargs.get('alpha')
+        adjacency_mat = _generate_granger_causality_connectivity(M_all, maxdelay, alpha)
+    
+    # TODO: Implement Transfer entropy
+    
+    else:
+        print('No such connectivity matrix exists')
+    # Mutual Information: Might not fit for this due to symmetry
+    # Coherence
+    return adjacency_mat
+
+# def generate_null_matrix(cov):
+#     plt.rcParams["figure.figsize"] = 15,7;count=2
+#     fig, axs = plt.subplots(2, 5, subplot_kw={'xticks': [], 'yticks': []})
+#     for i in range(2):
+#         for j in range(5):   
+#             model = SpectralBiclustering(n_clusters=count, random_state=0)
+#             model.fit(cov)
+#             fit_cov = cov[np.argsort(model.row_labels_)]
+#             fit_cov = fit_cov[:, np.argsort(model.row_labels_)]#column_labels_  // axs[i, j].imshow(fit_cov, cmap=plt.cm.Blues, vmin=0, vmax=30)
+#             axs[i, j].scatter(avg_coordinates[:,0],avg_coordinates[:,1], s=50,  c=model.row_labels_, cmap='viridis_r')
+#             count+=1
+#     plt.tight_layout()
+#     plt.tick_params(left = False)
+#     plt.savefig('raw_cluster', dpi = 100)
+#     plt.show()
+
+def threshold_correlation_mat(corr_mat: np.ndarray, thresh_type: str, **kwargs):
+    """
+    Threshold correlation matrix according to variables
+    """
+    if thresh_type == 'constant':
+        cor_threshold = kwargs.get('cor_threshold')
+        thresh_mat = _threshold_conn_by_constant(corr_mat, cor_threshold)
+    elif thresh_type == 'percentile':
+        percent_threshold = kwargs.get('percent_threshold')
+        thresh_mat = _threshold_conn_by_percentile(corr_mat, percent_threshold)
+    elif thresh_type == 'None':
+        return corr_mat
+    return thresh_mat
+
+def _threshold_conn_by_constant(corr_mat: np.ndarray, cor_threshold: float = 0.4):
+    """
+    Threshold according to a given correlation thresholds
+    """
+    A = corr_mat.copy()
+    A[np.abs(A)<cor_threshold] = 0
+    return A
+
+def _threshold_conn_by_percentile(corr_mat: np.ndarray, percent_threshold: int = 85):
+    """
+    Threshold according to percentile of matrix
+    """
+    A = corr_mat.copy()
+    per_thresh = np.percentile(np.abs(A), percent_threshold)
+    A[np.abs(A)<per_thresh] = 0
+    return A
+
+def build_shifted_control(trace_id: int, traces_mat: np.ndarray,
+                          num_iters: int = 50, min_shift: int = 300) -> np.ndarray:
+    """
+    Create a null-distibution of R^2 values based on shifted-control regression-scores:
+        1. randomly generate a shift-size in the range of [min_shift, total_time - min_shift)
+        2. roll all traces by the shift-size
+        3. calculate correlation coefficient (r) for every unit's trace, and store this value
+        4. repeat for a total of $num_iters
+    
+    Returns a matrix containing correlation-coefficient (r) for every shift×neuron pair (output shape: (num_iters, num_units))
+    Runtime ~ 240 sec (N=22k, T=1.9k, num_iters=50)
+    """
+    trace_vec = traces_mat[trace_id,:]
+    num_units, num_timestamps = traces_mat.shape
+    max_shift = num_timestamps - (min_shift + 1)  # we don't want to shift within less than $min_shift from the end
+    rand_shifts = np.random.randint(low=min_shift, high=max_shift, size=num_iters)
+    all_shifts_corr_scores = np.zeros((num_iters, num_units))
+    for i in range(num_iters):
+        shift = rand_shifts[i]
+        shifted_traces = np.roll(traces_mat, shift)
+        for unit_id, unit_trace in enumerate(shifted_traces):
+            r = np.corrcoef(unit_trace, trace_vec)[0, 1]  # calculate the correlation coefficient of each trace w/ the stimulus
+            all_shifts_corr_scores[i][unit_id] = r
+    return all_shifts_corr_scores
+
+
+def _threshold_conn_by_shuffling(traces: np.ndarray):
+    """
+    """
+    start_time = time.time()
+    for trace, trace_id in enumerate(traces):
+        stim_name = str(trace_id)
+        print(f"Building shifted control for trace #0 ({stim_name}°)")
+
+        trace_corr_scores = _build_shifted_control(trace_id, traces)
+
+        elapsed = time.time() - start_time
+    print(f"elapsed:\t{elapsed:.2f} sec")
+    print(trace_corr_scores.shape, trace_corr_scores.min(), trace_corr_scores.max())
+    
+
+
+
+def plot_control_distribution(correlation_data, control_data, unit_id: int, with_unit_id: int, with_plot = False) -> float:
+
+    # TODO: Decide on a p-value
+    r = correlation_data[unit_id][with_unit_id]
+    control_data = control_data[unit_id,:]
+    
+    # calculate p-value
+    p_value = sum(control_data < r) / len(control_data)
+    p_value = 1 - p_value if p_value > 0.5 else p_value
+    
+    # plot correlation value vs. shuffled control
+    if with_plot:
+        plt.clf()
+        top_percentile = np.percentile(control_data, 97.5)
+        low_percentile = np.percentile(control_data, 2.5)
+        plt.hist(control_data, bins=10)
+        y_min, y_max = plt.gca().get_ylim()
+        plt.vlines([top_percentile, low_percentile], y_min, y_max, color='k')
+        plt.vlines([r], y_min, y_max, color='gold')
+        plt.title(f"Unit {unit_id} againts Unit {with_unit_id}\n\tP$<=${p_value}")
+        plt.show()
+    return p_value
 
 # @jit
 def ComputeSpearmanSelfNumba(Matrix):

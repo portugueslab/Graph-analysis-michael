@@ -1,27 +1,36 @@
 import os
-import glob
+# import glob
 import numpy as np
-import pylab as pl
-import scipy.io as sio
+# import pylab as pl
+# import scipy.io as sio
 # for_Jyotika.m
 from copy import copy, deepcopy
-import pickle
-import matplotlib.cm as cm
-import pdb
-import h5py
-from sklearn.cluster import KMeans
-from sklearn.neighbors import NearestNeighbors
+# import pickle
+# import matplotlib.cm as cm
+# import pdb
+# import h5py
+
 import pandas as pd
 # import bct
-from collections import Counter 
-import matplotlib.cm as cm
+# from collections import Counter 
+
 import sys
-import networkx as nx
+
+
+# Plotting libs
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-from nilearn.connectome import ConnectivityMeasure
+import matplotlib.cm as cm
+#
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.cluster import KMeans
+from sklearn.neighbors import NearestNeighbors
+# graph libs
+import networkx as nx
 
+#
+import warnings
+warnings.simplefilter('always')  # Continually warn if problem
 
 # Define destination variables
 sys.path.append("./common/")
@@ -35,16 +44,13 @@ fig_target_dir = "./Figure2/"
 import numpy as np
 import sys, os
 # import snap
+import community
 import networkx as nx
 # import igraph as ig
 
 
-def threshold_connectivity(corr_mat,threshold = 0.4):
-    A = corr_mat.copy()
-    A[A<threshold] = 0
-    return A
 
-def plot_correlation_matrix(correlation_matrix, ax=None, title='Correlation matrix'):
+def plot_connectivity_matrix(correlation_matrix, ax=None, title='Correlation matrix'):
     if ax is None:
         ax = plt.gca()
     lim = np.abs(correlation_matrix).max()
@@ -60,7 +66,7 @@ def plot_correlation_matrix(correlation_matrix, ax=None, title='Correlation matr
     ax.set(xlabel="Nodes", ylabel="Nodes")
 
 
-def parcellate_zebrafish_brain(ROI_ALL, z_res, nantest):
+def parcellate_zebrafish_brain(ROI_ALL, z_res, nantest, **kwargs):
     """
     Inputs:
      - ROI_ALL: All the roi coordinates
@@ -77,12 +83,15 @@ def parcellate_zebrafish_brain(ROI_ALL, z_res, nantest):
     XYZ,xx,yy,zz =  _transform_xyz_coord(XYZ, z_res, nantest)
 
     # Find the LR centers
-    LR_centers = _cluster_left_right_centroids(XYZ, xx, hf = 205, sep = 60)
+    LR_centers, rxx, ryy, rzz, lxx, lyy, lzz = _cluster_left_right_centroids(XYZ, xx, hf = 205, sep = 60)
 
     # Find the nearest neighbours
     indices = _get_nearest_neurons_cluster(LR_centers, XYZ)
 
-    return XYZ, LR_centers, indices
+    # Combine all the scattering points into tuple
+    coord_tuple = (xx,yy,zz,rxx,ryy,rzz,lxx,lyy,lzz)
+
+    return XYZ, LR_centers, indices, coord_tuple
 
 def _transform_xyz_coord(XYZ, z_res, nantest):
     # Correct rows by swapping using advanced indices (1,2,0)
@@ -129,7 +138,7 @@ def _cluster_left_right_centroids(XYZ, xx, hf = 205, sep = 60):
     rzz = lzz
     R_centers = np.hstack((rxx.reshape(nClus,1),ryy.reshape(nClus,1),rzz.reshape(nClus,1)))
     LR_centers = np.concatenate((L_centers, R_centers))
-    return LR_centers
+    return LR_centers, rxx, ryy, rzz, lxx, lyy, lzz
 
 def _get_nearest_neurons_cluster(LR_centers, XYZ):
     """
@@ -163,47 +172,32 @@ def plot_3d_projection(XYZ, ax=None, dot_size=100, transparency=0.5):
     ax.set_zlabel(names[2], fontsize=12)
     ax.set_title("Distribution of neurons", fontsize=12)
 
-def define_connectivity_matrix(M_all, string_connectivity):
+def plot_spatial_node_clustering(coord_tuple, indices, axs,  nClus: int = 200):
     """
-    
-    Returns 
-    - fc_dict: A dictionary which keys represent the type connectivity and value hosts a matrix
+    Display spatial map of clustering results
     """
-    fc_dict = {} 
-    for con_type in string_connectivity:
-        # Covariance
-        if con_type == 'covariance':
-            correlation_measure = ConnectivityMeasure(kind=con_type)
-            fc_dict.update({con_type: correlation_measure.fit_transform([M_all])[0]})
+    xx, yy , zz, rxx, ryy, rzz, lxx, lyy, lzz = coord_tuple 
 
-        # Correlation
-        if con_type == 'correlation':
-            correlation_measure = ConnectivityMeasure(kind=con_type)
-            correlation_matrix = correlation_measure.fit_transform([M_all])[0]
-            fc_dict.update({con_type: correlation_matrix})
+    axs[0].scatter(lxx, lyy, lw=0, s=15, alpha=1,  color=(0.3,) * 3)
+    axs[0].scatter(rxx, ryy, lw=0, s=15, alpha=1,  color=(0.3,) * 3)
 
-            # Add Z-Fisher Transformed
-            z_fisher_correlation_matrix = np.tanh(correlation_matrix)
-            # z_fisher_correlation_matrix = np.arctanh(correlation_matrix)
-            fc_dict.update({'z-fisher correlation': z_fisher_correlation_matrix})
 
-        # Partial Correlation
-        elif con_type == 'partial correlation':
-            correlation_measure = ConnectivityMeasure(kind=con_type)
-            fc_dict.update({con_type: correlation_measure.fit_transform([M_all])[0]})
-            
-        # Euclidian Distance
-        elif con_type == 'euclidian distance':
-            fc_dict.update({con_type: euclidean_distances(M_all.T,M_all.T,)})
-    
-    # Mutual Information: Might not fit for this due to symmetry
+    axs[1].scatter(lyy, lzz, lw=0, s=15, alpha=1,  color=(0.3,) * 3)
+    axs[1].scatter(ryy, rzz, lw=0, s=15, alpha=1, color=(0.3,) * 3)
 
-    # TODO: Implement Transfer entropy
+    for c in range(2*nClus):
+        sub_ind = np.argwhere(indices==c) 
+        
+        axs[0].scatter(xx[sub_ind], yy[sub_ind], lw=0, s=5, alpha=0.15)
+        axs[1].scatter(yy[sub_ind], zz[sub_ind], lw=0, s=5, alpha=0.15)
 
-    # Coherence
+    for i in range(2):
+        # axs[i].set_title(k)
+        axs[i].axis("equal")
+        axs[i].axis("off")
 
-    # TODO: Implement Granger Causality 
-    return fc_dict
+    coord_tuple = (xx,yy,zz,rxx,ryy,rzz,lxx,lyy,lzz)
+    plt.show() 
 
 def plot_corr_vs_dist(spatial_dist_mat, correlation_matrix, ax=None, title=None):
     if ax is None:
@@ -229,48 +223,31 @@ def plot_corr_vs_dist(spatial_dist_mat, correlation_matrix, ax=None, title=None)
     p = np.poly1d(z)
     ax.plot(spatial_dist_mat.ravel(),p(spatial_dist_mat.ravel()),"r-")
 
-def threshold_conn_by_constant(corr_mat,threshold = 0.4):
-    A = corr_mat.copy()
-    A[np.abs(A)<threshold] = 0
-    return A
+#------------------------------------ Generate graphs --------------------------------------- #
 
-def threshold_conn_by_percentile(corr_mat,percentile = 85):
-    A = corr_mat.copy()
-    per_thresh = np.percentile(np.abs(A), percentile)
-    A[np.abs(A)<per_thresh] = 0
-    return A
-
-def threshold_conn_by_shuffling(corr_mat,threshold = 0.4):
-    """
-    """
+# def generate_snap_unweighted_graph(A, directed=False, save=None):
+#     N, _ = A.shape
+#     nids = np.arange(N)
     
-
-
-
-def generate_snap_unweighted_graph(A, directed=False, save=None):
-    N, _ = A.shape
-    nids = np.arange(N)
+#     graph = None
+#     if directed:
+#         graph = snap.TNGraph.New()
+#     else:
+#         A = np.triu(A)
+#         graph = snap.TUNGraph.New()
     
-    graph = None
-    if directed:
-        graph = snap.TNGraph.New()
-    else:
-        A = np.triu(A)
-        graph = snap.TUNGraph.New()
-    
-    for nid in nids: graph.AddNode(int(nid))
-    srcs,dsts = np.where(A == 1)
-    for (src, dst) in list(zip(srcs,dsts)):
-        if src == dst: continue
-        graph.AddEdge(int(src), int(dst))  
-    if save is not None:
-        try:
-            snap.SaveEdgeList(graph, save)
-        except:
-            print('Error, could not save to %s' % save)
+#     for nid in nids: graph.AddNode(int(nid))
+#     srcs,dsts = np.where(A == 1)
+#     for (src, dst) in list(zip(srcs,dsts)):
+#         if src == dst: continue
+#         graph.AddEdge(int(src), int(dst))  
+#     if save is not None:
+#         try:
+#             snap.SaveEdgeList(graph, save)
+#         except:
+#             print('Error, could not save to %s' % save)
 
-    return graph
-
+#     return graph
 
 def generate_nx_graph(A, directed=False, weighted=False):
     graph = None
@@ -307,6 +284,147 @@ def generate_igraph(A, directed=False):
         print('base exception excepted..')
         pass
     return g, weights
+
+
+def draw_network_graph(graph_fish, coord_pos, cof_d, node_options = {}, edge_options = {}, draw_edge: bool = False, ax=None, title=''):
+    '''
+    '''
+    if ax is None:
+        ax = plt.gca()
+
+    # get edge weights labels
+    labels = nx.get_edge_attributes(graph_fish, 'weight')
+
+    # Draw selected coefficient
+    d = dict(graph_fish.degree)
+    
+    # Color nodes according to their hemisphere
+    # color_map = []
+    # for node in graph_fish:
+    #     if node < 100:
+    #         color_map.append('blue')
+    #     else: 
+    #         color_map.append('green')
+
+    nx.draw_networkx_nodes(graph_fish, node_size=[cof_d[k] for k in cof_d], pos=coord_pos, ax=ax) # draw nodes and edges
+    if draw_edge:
+        for edge in graph_fish.edges(data='weight'):
+            nx.draw_networkx_edges(graph_fish, coord_pos, edgelist=[edge], width=edge[2])
+    ax.set_title(title)
+    ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+
+def efficiency(G, n1, n2):
+    """
+    Calculate the efficiency of a pair of nodes in a graph. 
+    Efficiency of a pair of nodes is defined as the inverse of the shortest path each
+    node.
+    
+    Args:
+        G : graph
+            An undirected graph to compute the average local efficiency of
+        n1, n2: node
+            Nodes in the graph G
+    Returns:
+        float
+            efficiency between the node u and v"""
+
+    if G.is_directed() is True:
+        warnings.warn("Graph shouldn't be directed", Warning)
+
+    if nx.has_path(G, n1, n2):
+        efficiency_param = 1. / nx.shortest_path_length(G, n1, n2)
+        return efficiency_param
+    else:
+        return 0.
+
+def global_efficiency(G):
+    """Calculate global efficiency for a graph. Global efficiency is the
+    average efficiency of all nodes in the graph.
+    Parameters
+    ----------
+    G : networkX graph
+    Returns
+    -------
+    float : avg global efficiency of the graph
+    """
+
+    if G is None:
+        return 0.
+    if G.is_directed() is True:
+        warnings.warn("Graph shouldn't be directed", Warning)
+
+    n_nodes = G.number_of_nodes()
+    if n_nodes < 2:
+        return 0
+    den = np.float(n_nodes * (n_nodes - 1))
+
+    return sum(efficiency(G, n1, n2) for n1, n2 in permutations(G, 2)) / den
+
+def local_efficiency(G):
+    """Calculate average local efficiency for a graph. Local efficiency is the
+    average efficiency of all neighbors of the given node.
+    Parameters
+    ----------
+    G : networkX graph
+    Returns
+    -------
+    float : avg local efficiency of the graph
+    """
+
+    if G is None:
+        return 0
+    if G.is_directed() is True:
+        warnings.warn("Graph shouldn't be directed", Warning)
+
+    return sum([global_efficiency(G.subgraph(G[v])) for v in G]) / G.order()
+
+def swapped_cost_distr(A, D, n_trials=500, percent_change=True):
+    """Calculate how much the wiring distance cost changes for a random node
+    swap.
+    Args:
+        A: adjacency matrix
+        D: distance matrix
+        n_trials: how many times to make a random swap (starting from the
+            original configuration)
+        percent_change: set to True to return percent changes in cost
+    Returns:
+        vector of cost changes for random swaps"""
+    # Calculate true cost
+    true_cost = wiring_distance_cost(A, D)
+    # Allocate space for storing amount by which cost changes
+    cost_changes = np.zeros((n_trials,), dtype=float)
+
+    # Perform random swaps
+    for trial in range(n_trials):
+        print('trial %d' % trial)
+        # Randomly select two nodes
+        idx0, idx1 = np.random.permutation(D.shape[0])[:2]
+        # Create new distance matrix
+        D_swapped = aux.swap_nodes(D, idx0, idx1)
+        # Calculate cost change for swapped-node graph
+        cost_changes[trial] = wiring_distance_cost(A, D_swapped) - true_cost
+
+    if percent_change:
+        cost_changes /= true_cost
+        cost_changes *= 100
+
+    return cost_changes
+
+
+def edge_count(G):
+    """Helper for number of edges"""
+    if G is None:
+        return 0
+    else:
+        return G.number_of_edges()
+
+
+def density(G):
+    """Helper for connection density"""
+    if G is None:
+        return 0
+    else:
+        return nx.density(G)
 
 def get_node_centrality(graph, gtype='nx'):
     nids, deg_centr = [], []
@@ -373,19 +491,12 @@ def get_betweenness_centrality(graph,k=None):
         bw_centr.append(centrality[node])
     return np.asarray(nids, dtype='uint32'), np.asarray(bw_centr, dtype='float32')
 
-def get_clustering_coefficient(graph, gtype='nx'):
+def get_clustering_coefficient(graph):
     nids, ccs = [], []
-    if gtype == 'snap':
-        NIdCCfH = snap.TIntFltH()
-        snap.GetNodeClustCf(graph, NIdCCfH)
-        for item in NIdCCfH:
-            nids.append(item)
-            ccs.append(NIdCCfH[item])
-    elif gtype == 'nx':
-        cc_output = nx.clustering(graph, weight='weight')
-        for nid in np.sort(list(cc_output.keys())):
-            nids.append(nid)
-            ccs.append(cc_output[nid])
+    cc_output = nx.clustering(graph, weight='weight')
+    for nid in np.sort(list(cc_output.keys())):
+        nids.append(nid)
+        ccs.append(cc_output[nid])
     return np.asarray(nids, dtype='uint32'), np.asarray(ccs, dtype='float32')
 
           
@@ -424,9 +535,7 @@ def extract_outgoing_hubs(J, jthreshold, hub_percentile, N, idxs=None):
     
     return valid_nids, outgoing_degrees
 
-def louvain_clustering(adjacency, directed=False):
-    import community 
-    graph = generate_nx_graph(adjacency, directed=directed, weighted=True)
+def louvain_clustering(graph):
     part = community.best_partition(graph, weight='weight')
     modularity = community.modularity(part, graph)
     return part, modularity
@@ -442,31 +551,117 @@ def leiden_clustering(adjacency, res=1.0, directed=False, part=None):
     return part, modularity 
 
 
-def run_motif_counting_algorithm(input_filepath, output_filepath, cwd):
-    program_filepath = '/mnt/e/dhh-soltesz-lab/snap-higher-order/examples/motifs'
-    os.chdir(program_filepath)
-    os.system('./motifs -i:%s -m:3 -d:N -o:%s' % (input_filepath, output_filepath))
-    os.chdir(cwd)
-    
-    
-def read_motif_counts(input_filepath):
-    f = open(input_filepath, 'r')
-    lcount = 0
-    count_dict = {}
-    for line in f.readlines():
-        if lcount == 0:
-            lcount += 1
-            continue
-        line = line.strip('\n').split('\t')
-        mid, mcount = int(line[0]), int(line[-1])
-        count_dict[mid] = mcount
-    return count_dict
+def swap_nodes(D, idx0, idx1):
+    """Return distance matrix after randomly swapping a pair of nodes.
+       Returns:
+           swapped distance matrix, indices of swapped nodes"""
+    D_swapped = D.copy()
+
+    # Swap rows & columns of distance matrix
+    D_swapped[[idx0, idx1], :] = D_swapped[[idx1, idx0], :]
+    D_swapped[:, [idx0, idx1]] = D_swapped[:, [idx1, idx0]]
+
+    return D_swapped
 
 
-def run_higher_order_analysis(input_filepath, output_filepath, cwd, motif):
-    os.chdir('/mnt/e/dhh-soltesz-lab/snap-higher-order/examples/motifcluster')
-    os.system('./motifclustermain -i:%s -m:%s -o:%s' % (input_filepath, motif, output_filepath))
-    os.chdir(cwd)
+def lesion_graph_randomly(graph, prop):
+    """
+    Randomly remove vertices from a graph according to probability of removal.
+    Args:
+        graph: NetworkX graph to be lesioned.
+        prop: Occupation probability (probability of node being pruned)
+    Returns:
+        G: NetworkX graph
+        A: Adjacency matrix for graph
+    """
+    G = deepcopy(graph)
+    if prop == 0.:
+        return G, nx.adjacency_matrix(G)
+
+    # Error checking
+    assert prop >= 0. and prop <= 1.0, 'prop must be 0.0 <= prop <= 1.0'
+    assert graph.order > 0, 'Graph is empty'
+
+    # Get list of nodes and probabilty (uniform random) of executing each one
+    node_list = graph.nodes()
+    execute_prob = np.random.random((len(node_list),))
+
+    # Identify random nodes to cut
+    cut_nodes = [node_list[i] for i in range(len(node_list))
+                 if execute_prob[i] <= prop]
+
+    G.remove_nodes_from(cut_nodes)
+
+    if G.order() > 0:
+        return G, nx.adjacency_matrix(G)
+    else:
+        #print 'Graph completely lesioned.'
+        return G, None
+
+
+def lesion_graph_degree(graph, num_lesions):
+    """
+    Remove vertices from a graph according to degree.
+    Args:
+        graph: NetworkX graph to be lesioned.
+        num_lesions: Number of top degree nodes to remove.
+    Returns:
+        G: NetworkX graph
+        A: Adjacency matrix for graph
+    """
+    # Error checking
+    G = deepcopy(graph)
+    if num_lesions == 0:
+        return G, nx.adjacency_matrix(G)
+
+    assert num_lesions >= 0 and num_lesions < graph.order, 'Attempting to\
+        remove too many/few nodes'
+
+    for l in range(num_lesions):
+        # Identify node to cut
+        node_i, node_d = max(G.degree().items(),
+                             key=lambda degree: degree[1])
+        G.remove_node(node_i)
+
+    if G.order() > 0:
+        return G, nx.adjacency_matrix(G)
+    else:
+        #print 'Graph completely lesioned.'
+        return None, None
+
+
+def lesion_graph_degree_thresh(graph, threshold):
+    """
+    Remove vertices from a graph with degree greater than or equal to
+    threshold.
+    Parameters:
+    -----------
+        graph: NetworkX graph to be lesioned.
+        threshold: Degree above which to remove nodes.
+    Returns:
+    --------
+        G: NetworkX graph
+        A: Adjacency matrix for graph
+    """
+    # Error checking
+    G = deepcopy(graph)
+
+    assert threshold >= 0, " In percolation, `threshold` must be >= 0."
+    # Check if lesioning is necessary for threshold
+    if threshold > max(G.degree().values()):
+        return G, nx.adjacency_matrix(G)
+
+    # Identify all node indices >= threshold
+    node_inds = np.where(np.asarray(G.degree().values()) >= threshold)[0]
+    # Eliminate these nodes
+    G.remove_nodes_from(node_inds)
+
+    if G.order() > 0:
+        return G, nx.adjacency_matrix(G)
+    else:
+        #print 'Graph completely lesioned.'
+        return None, None
+
     
 def plot_higher_order(input_filepath, spatial_coords, view, idxs=None):
     import matplotlib.pyplot as plt
@@ -537,8 +732,6 @@ def get_bifan_edges(triplets):
                 if [x2,y2] not in bifan_edges:
                     bifan_edges.append([x2,y2])
     return bifan_edges
-
-    
     
 def extract_motifs(J, motif='send'):
     triplets = []   
@@ -569,6 +762,7 @@ def extract_motifs(J, motif='send'):
             if i % 5000 == 0:
                 print(i, len(srcs))
             i += 1
+    
     elif motif == 'recurrent':
         i = 0
         for (src, dst) in list(zip(srcs, dsts)):
